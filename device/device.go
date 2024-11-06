@@ -402,7 +402,6 @@ func (device *Device) Close() {
 
 	device.log.Verbosef("Device closed")
 	close(device.closed)
-	close(device.handshakeStateChan)
 }
 
 func (device *Device) UpdateHandshakeState(state HandshakeState) {
