@@ -54,6 +54,7 @@ type WireGuardStateManager struct {
 	log              *Logger
 	mu               sync.Mutex
 	closed           bool
+	stopping         sync.WaitGroup
 	startedTimestamp time.Time
 	nextRestartDelay time.Duration
 }
@@ -89,6 +90,7 @@ func NewWireGuardStateManager(log *Logger, transmission string) *WireGuardStateM
 }
 
 func (man *WireGuardStateManager) Start(device BaseDevice) {
+	man.stopping.Add(1)
 	go man.handlerLoop(device)
 }
 
@@ -105,6 +107,7 @@ func (man *WireGuardStateManager) Close() {
 	man.closed = true
 	go func() {
 		man.closeChan <- true
+		man.stopping.Wait() // Wait for handlerLoop and all postState goroutines to finish.
 		man.stateChan <- WireGuardDisabled
 		close(man.stateChan)
 	}()
@@ -115,6 +118,7 @@ func (man *WireGuardStateManager) SetNetworkAvailable(available bool) {
 }
 
 func (man *WireGuardStateManager) handlerLoop(device BaseDevice) {
+	defer man.stopping.Done()
 	man.log.Verbosef("StateManager: start loop")
 	// Ugly way of emulating optional bool type
 	var wasNetAvailablePtr *bool = nil
@@ -239,7 +243,9 @@ func (man *WireGuardStateManager) shouldRestart() bool {
 }
 
 func (man *WireGuardStateManager) postState(state WireGuardState) {
+	man.stopping.Add(1)
 	go func() {
+		defer man.stopping.Done()
 		if !man.closed && (man.isNetAvailable || state == WireGuardWaitingForNetwork) {
 			man.stateChan <- state
 		}
