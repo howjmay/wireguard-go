@@ -120,14 +120,11 @@ func (man *WireGuardStateManager) SetNetworkAvailable(available bool) {
 func (man *WireGuardStateManager) handlerLoop(device BaseDevice) {
 	defer man.stopping.Done()
 	man.log.Verbosef("StateManager: start loop")
-	// Ugly way of emulating optional bool type
-	var wasNetAvailablePtr *bool = nil
 	for {
 		select {
 		case netAvailable := <-man.networkAvailableChan:
-			man.onNetworkAvailabilityChange(device, wasNetAvailablePtr, netAvailable)
+			man.onNetworkAvailabilityChange(device, netAvailable)
 			man.isNetAvailable = netAvailable
-			wasNetAvailablePtr = &man.isNetAvailable
 		case socketErr := <-man.SocketErrChan:
 			if man.isNetAvailable {
 				man.handleSocketErr(device, socketErr)
@@ -143,24 +140,25 @@ func (man *WireGuardStateManager) handlerLoop(device BaseDevice) {
 	}
 }
 
-func (man *WireGuardStateManager) onNetworkAvailabilityChange(device BaseDevice, wasAvailable *bool, available bool) {
+func (man *WireGuardStateManager) onNetworkAvailabilityChange(device BaseDevice, available bool) {
 	if !available {
 		man.postState(WireGuardWaitingForNetwork)
 	}
-	if available && wasAvailable == nil {
+	var isStarted bool = !man.startedTimestamp.IsZero()
+	var wasAvailable bool = man.isNetAvailable && isStarted
+	if available && !isStarted {
 		man.log.Verbosef("StateManager: network on")
 		man.setActive(device, true)
 		man.startedTimestamp = timeNow()
-	} else if available && *wasAvailable && !man.startedTimestamp.IsZero() &&
-		timeNow().After(man.startedTimestamp.Add(5*time.Second)) {
+	} else if available && wasAvailable && timeNow().After(man.startedTimestamp.Add(5*time.Second)) {
 		// Ignore network changes at the very beginning of connection as those might be false positive
 		// (VPN tunnel opening)
 		man.log.Verbosef("StateManager: network change detected")
 		man.maybeRestart(device)
-	} else if available && !*wasAvailable {
+	} else if available && !wasAvailable {
 		man.log.Verbosef("StateManager: network back")
 		man.setActive(device, true)
-	} else if !available && wasAvailable != nil && *wasAvailable {
+	} else if !available && wasAvailable {
 		man.log.Verbosef("StateManager: network gone")
 		man.setActive(device, false)
 	}
