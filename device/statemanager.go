@@ -22,6 +22,7 @@ package device
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,14 +47,14 @@ type WireGuardStateManager struct {
 	closeChan            chan bool
 
 	stateChan      chan WireGuardState
-	isNetAvailable bool
+	isNetAvailable atomic.Bool
 
 	lastRestart  time.Time
 	transmission string
 
 	log              *Logger
 	mu               sync.Mutex
-	closed           bool
+	closed           atomic.Bool
 	stopping         sync.WaitGroup
 	startedTimestamp time.Time
 	nextRestartDelay time.Duration
@@ -104,7 +105,7 @@ func (man *WireGuardStateManager) GetState() WireGuardState {
 
 func (man *WireGuardStateManager) Close() {
 	man.log.Verbosef("StateManager: closing")
-	man.closed = true
+	man.closed.Store(true)
 	go func() {
 		man.closeChan <- true
 		man.stopping.Wait() // Wait for handlerLoop and all postState goroutines to finish.
@@ -124,13 +125,13 @@ func (man *WireGuardStateManager) handlerLoop(device BaseDevice) {
 		select {
 		case netAvailable := <-man.networkAvailableChan:
 			man.onNetworkAvailabilityChange(device, netAvailable)
-			man.isNetAvailable = netAvailable
+			man.isNetAvailable.Store(netAvailable)
 		case socketErr := <-man.SocketErrChan:
-			if man.isNetAvailable {
+			if man.isNetAvailable.Load() {
 				man.handleSocketErr(device, socketErr)
 			}
 		case handshakeState := <-man.HandshakeStateChan:
-			if man.isNetAvailable {
+			if man.isNetAvailable.Load() {
 				man.handleHandshakeState(device, handshakeState)
 			}
 		case <-man.closeChan:
@@ -145,7 +146,7 @@ func (man *WireGuardStateManager) onNetworkAvailabilityChange(device BaseDevice,
 		man.postState(WireGuardWaitingForNetwork)
 	}
 	var isStarted bool = !man.startedTimestamp.IsZero()
-	var wasAvailable bool = man.isNetAvailable && isStarted
+	var wasAvailable bool = man.isNetAvailable.Load() && isStarted
 	if available && !isStarted {
 		man.log.Verbosef("StateManager: network on")
 		man.setActive(device, true)
@@ -216,7 +217,7 @@ func (man *WireGuardStateManager) maybeRestart(device BaseDevice) {
 		man.log.Verbosef("StateManager: restarting")
 		man.postState(WireGuardConnecting)
 		device.Down()
-		if !man.closed {
+		if !man.closed.Load() {
 			device.Up()
 		}
 	}
@@ -244,7 +245,7 @@ func (man *WireGuardStateManager) postState(state WireGuardState) {
 	man.stopping.Add(1)
 	go func() {
 		defer man.stopping.Done()
-		if !man.closed && (man.isNetAvailable || state == WireGuardWaitingForNetwork) {
+		if !man.closed.Load() && (man.isNetAvailable.Load() || state == WireGuardWaitingForNetwork) {
 			man.stateChan <- state
 		}
 	}()
