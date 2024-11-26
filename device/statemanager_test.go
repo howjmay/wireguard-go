@@ -52,7 +52,7 @@ func setup() {
 	timeNow = func() time.Time { return time.UnixMilli(timeMs) }
 	mockDevice.isUp = false
 
-	manager = NewWireGuardStateManager(NewLogger(LogLevelVerbose, ""), "tcp")
+	manager = NewWireGuardStateManager(NewLogger(LogLevelVerbose, ""), false)
 	manager.Start(&mockDevice)
 	lastState = WireGuardDisabled
 	go func() {

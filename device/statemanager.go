@@ -49,8 +49,8 @@ type WireGuardStateManager struct {
 	stateChan      chan WireGuardState
 	isNetAvailable atomic.Bool
 
-	lastRestart  time.Time
-	transmission string
+	lastRestart      time.Time
+	udpTransmission  bool
 
 	log              *Logger
 	mu               sync.Mutex
@@ -76,14 +76,14 @@ type BaseDevice interface {
 }
 
 //goland:noinspection GoUnusedExportedFunction
-func NewWireGuardStateManager(log *Logger, transmission string) *WireGuardStateManager {
+func NewWireGuardStateManager(log *Logger, udpTransmission bool) *WireGuardStateManager {
 	return &WireGuardStateManager{
 		networkAvailableChan: make(chan bool, 100),
 		SocketErrChan:        make(chan error, 100),
 		HandshakeStateChan:   make(chan HandshakeState, 100),
 		closeChan:            make(chan bool, 1),
 		stateChan:            make(chan WireGuardState, 1),
-		transmission:         transmission,
+		udpTransmission:      udpTransmission,
 		log:                  log,
 		nextRestartDelay:     initialRestartDelay,
 		lastRestart:          timeNow(),
@@ -206,7 +206,7 @@ func (man *WireGuardStateManager) handleHandshakeState(device BaseDevice, state 
 }
 
 func (man *WireGuardStateManager) maybeRestart(device BaseDevice) {
-	if man.transmission == "udp" {
+	if man.udpTransmission {
 		return
 	}
 
